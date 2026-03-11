@@ -543,11 +543,21 @@
     var banner = documentRef.getElementById("banner");
     var ring = documentRef.getElementById("progress-ring-value");
     var ringLength = 2 * Math.PI * 96;
+    var utilityHideTimer = null;
+    var prefersHover = typeof window.matchMedia === "function"
+      ? window.matchMedia("(hover: hover) and (pointer: fine)").matches
+      : false;
+    var uiState = {
+      musicExpanded: false,
+      historyExpanded: false,
+      utilitiesVisible: !prefersHover
+    };
 
     ring.style.strokeDasharray = String(ringLength);
     ring.style.strokeDashoffset = String(ringLength);
 
     var els = {
+      backgroundVideo: documentRef.querySelector(".video-background video"),
       themeToggle: documentRef.getElementById("theme-toggle"),
       phaseTitle: documentRef.getElementById("phase-title"),
       phaseCaption: documentRef.getElementById("phase-caption"),
@@ -573,6 +583,12 @@
       volumeSlider: documentRef.getElementById("volume-slider"),
       audioTime: documentRef.getElementById("audio-time"),
       audioSourceNote: documentRef.getElementById("audio-source-note"),
+      musicPill: documentRef.querySelector(".music-pill"),
+      musicPillToggle: documentRef.getElementById("music-pill-toggle"),
+      trackMirrors: documentRef.querySelectorAll("[data-track-mirror]"),
+      historyToggle: documentRef.getElementById("history-toggle"),
+      historyPanel: documentRef.getElementById("history-panel"),
+      utilityTray: documentRef.getElementById("utility-tray"),
       todayTotal: documentRef.getElementById("today-total"),
       todaySessions: documentRef.getElementById("today-sessions"),
       currentStreak: documentRef.getElementById("current-streak"),
@@ -616,6 +632,40 @@
     function applyTheme(theme) {
       root.dataset.theme = theme === "light" ? "light" : "dark";
       els.themeToggle.textContent = root.dataset.theme === "dark" ? "Light mode" : "Dark mode";
+    }
+
+    function setUtilitiesVisible(visible) {
+      uiState.utilitiesVisible = visible;
+      els.utilityTray.classList.toggle("is-hidden", !visible);
+      els.utilityTray.classList.toggle("is-visible", visible);
+    }
+
+    function scheduleUtilityHide() {
+      if (!prefersHover) {
+        setUtilitiesVisible(true);
+        return;
+      }
+
+      window.clearTimeout(utilityHideTimer);
+      setUtilitiesVisible(true);
+      utilityHideTimer = window.setTimeout(function () {
+        setUtilitiesVisible(false);
+      }, 2000);
+    }
+
+    function renderHistoryVisibility() {
+      els.historyPanel.hidden = !uiState.historyExpanded;
+      els.historyToggle.setAttribute("aria-expanded", uiState.historyExpanded ? "true" : "false");
+      els.historyToggle.textContent = uiState.historyExpanded ? "Hide history" : "View history";
+    }
+
+    function renderMusicVisibility() {
+      els.musicPill.dataset.musicState = uiState.musicExpanded ? "expanded" : "collapsed";
+      els.musicPillToggle.setAttribute("aria-expanded", uiState.musicExpanded ? "true" : "false");
+    }
+
+    function renderUtilityVisibility() {
+      setUtilitiesVisible(uiState.utilitiesVisible);
     }
 
     function createSessionRecord(outcome, details) {
@@ -678,6 +728,14 @@
       els.pauseButton.textContent = state.status === "paused" ? "Resume" : "Pause";
       els.pauseButton.disabled = state.status === "idle";
       els.skipButton.disabled = state.mode === "countup";
+      els.startButton.hidden = state.status !== "idle";
+      els.pauseButton.hidden = state.status === "idle";
+      els.pauseButton.innerHTML = state.status === "paused"
+        ? '<span class="icon-slot" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 6.5v11l9-5.5z"></path></svg></span>'
+        : '<span class="icon-slot" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 6h3.5v12H8zM12.5 6H16v12h-3.5z"></path></svg></span>';
+      els.pauseButton.setAttribute("aria-label", state.status === "paused" ? "Resume timer" : "Pause timer");
+      root.dataset.timerRunning = state.status === "running" ? "true" : "false";
+      root.dataset.phaseTone = state.mode === "pomodoro" && state.phase !== "focus" ? "break" : "focus";
       els.modeButtons.forEach(function (button) {
         button.classList.toggle("is-active", button.dataset.mode === state.mode);
       });
@@ -737,9 +795,14 @@
     function renderAudio() {
       var snapshot = env.audioController.getSnapshot();
       els.trackName.textContent = snapshot.trackName;
+      els.trackMirrors.forEach(function (node) {
+        node.textContent = snapshot.trackName;
+      });
       els.volumeSlider.value = String(Math.round(snapshot.volume * 100));
       els.audioMute.textContent = snapshot.muted ? "Unmute" : "Mute";
       els.audioSourceNote.textContent = snapshot.sourceType === "builtin" ? "Built-in loop" : "Uploaded track";
+      els.audioPlay.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5v11l9-5.5z"></path></svg>';
+      els.audioPlay.setAttribute("aria-label", "Play audio");
       els.audioStatus.textContent = snapshot.status === "blocked"
         ? "Playback needs a direct user action in this browser."
         : snapshot.status === "playing"
@@ -806,6 +869,7 @@
       applyTheme(root.dataset.theme === "dark" ? "light" : "dark");
       persistSettings();
       hideBanner();
+      scheduleUtilityHide();
     });
 
     els.modeButtons.forEach(function (button) {
@@ -813,6 +877,7 @@
         env.timer.setMode(button.dataset.mode);
         persistSettings();
         renderTimer();
+        scheduleUtilityHide();
       });
     });
 
@@ -820,6 +885,7 @@
       env.timer.start(Date.now());
       renderTimer();
       hideBanner();
+      scheduleUtilityHide();
     });
 
     els.pauseButton.addEventListener("click", function () {
@@ -829,6 +895,7 @@
         env.timer.start(Date.now());
       }
       renderTimer();
+      scheduleUtilityHide();
     });
 
     els.resetButton.addEventListener("click", function () {
@@ -837,15 +904,20 @@
       }
       env.timer.reset();
       renderTimer();
+      scheduleUtilityHide();
     });
 
     els.skipButton.addEventListener("click", function () {
       env.timer.skipPhase();
       renderTimer();
+      scheduleUtilityHide();
     });
 
     [els.focusMinutes, els.shortBreakMinutes, els.longBreakMinutes].forEach(function (input) {
-      input.addEventListener("change", applyDurationInputs);
+      input.addEventListener("change", function () {
+        applyDurationInputs();
+        scheduleUtilityHide();
+      });
     });
 
     els.audioPlay.addEventListener("click", function () {
@@ -855,17 +927,20 @@
           showBanner("Playback is waiting for a direct browser gesture. Press Play again if needed.", "warning");
         }
       });
+      scheduleUtilityHide();
     });
 
     els.audioStop.addEventListener("click", function () {
       env.audioController.stop();
       renderAudio();
+      scheduleUtilityHide();
     });
 
     els.audioMute.addEventListener("click", function () {
       env.audioController.toggleMute();
       persistSettings();
       renderAudio();
+      scheduleUtilityHide();
     });
 
     els.audioUpload.addEventListener("change", function (event) {
@@ -878,23 +953,61 @@
         renderAudio();
         hideBanner();
       }
+      scheduleUtilityHide();
     });
 
     els.seekSlider.addEventListener("input", function () {
       env.audioController.setSeek(Number(els.seekSlider.value) / 100);
       renderAudio();
+      scheduleUtilityHide();
     });
 
     els.volumeSlider.addEventListener("input", function () {
       env.audioController.setVolume(Number(els.volumeSlider.value) / 100);
       persistSettings();
       renderAudio();
+      scheduleUtilityHide();
+    });
+
+    els.musicPillToggle.addEventListener("click", function () {
+      uiState.musicExpanded = !uiState.musicExpanded;
+      renderMusicVisibility();
+      scheduleUtilityHide();
+    });
+
+    els.historyToggle.addEventListener("click", function () {
+      uiState.historyExpanded = !uiState.historyExpanded;
+      renderHistoryVisibility();
+      scheduleUtilityHide();
     });
 
     if (env.audioElement) {
       env.audioElement.addEventListener("timeupdate", renderAudio);
       env.audioElement.addEventListener("ended", renderAudio);
       env.audioElement.addEventListener("loadedmetadata", renderAudio);
+    }
+
+    if (els.backgroundVideo) {
+      els.backgroundVideo.addEventListener("canplay", function () {
+        els.backgroundVideo.style.opacity = "1";
+      });
+      els.backgroundVideo.addEventListener("error", function () {
+        els.backgroundVideo.style.opacity = "0";
+      });
+    }
+
+    if (prefersHover) {
+      documentRef.addEventListener("mousemove", scheduleUtilityHide);
+      documentRef.addEventListener("keydown", scheduleUtilityHide);
+      els.utilityTray.addEventListener("mouseenter", function () {
+        window.clearTimeout(utilityHideTimer);
+        setUtilitiesVisible(true);
+      });
+      els.utilityTray.addEventListener("mouseleave", scheduleUtilityHide);
+    } else {
+      documentRef.addEventListener("touchstart", function () {
+        setUtilitiesVisible(true);
+      }, { passive: true });
     }
 
     documentRef.addEventListener("keydown", function (event) {
@@ -931,10 +1044,15 @@
     renderTimer();
     renderStats();
     renderAudio();
+    renderMusicVisibility();
+    renderHistoryVisibility();
+    renderUtilityVisibility();
+    scheduleUtilityHide();
 
     return {
       destroy: function () {
         window.clearInterval(tickHandle);
+        window.clearTimeout(utilityHideTimer);
       },
       showBanner: showBanner
     };
