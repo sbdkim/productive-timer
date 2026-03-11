@@ -545,6 +545,7 @@
     var ringRadius = Number(ring.getAttribute("r")) || 96;
     var ringLength = 2 * Math.PI * ringRadius;
     var utilityHideTimer = null;
+    var autoplayRetryArmed = false;
     var prefersHover = typeof window.matchMedia === "function"
       ? window.matchMedia("(hover: hover) and (pointer: fine)").matches
       : false;
@@ -667,6 +668,49 @@
 
     function renderUtilityVisibility() {
       setUtilitiesVisible(uiState.utilitiesVisible);
+    }
+
+    function disarmAutoplayRetry() {
+      if (!autoplayRetryArmed) {
+        return;
+      }
+      autoplayRetryArmed = false;
+      documentRef.removeEventListener("pointerdown", handleAutoplayRetry, true);
+      documentRef.removeEventListener("keydown", handleAutoplayRetry, true);
+      documentRef.removeEventListener("touchstart", handleAutoplayRetry, true);
+    }
+
+    function handleAutoplayRetry() {
+      env.audioController.play().then(function (result) {
+        renderAudio();
+        if (result.ok) {
+          hideBanner();
+          disarmAutoplayRetry();
+        }
+      });
+    }
+
+    function armAutoplayRetry() {
+      if (autoplayRetryArmed) {
+        return;
+      }
+      autoplayRetryArmed = true;
+      documentRef.addEventListener("pointerdown", handleAutoplayRetry, true);
+      documentRef.addEventListener("keydown", handleAutoplayRetry, true);
+      documentRef.addEventListener("touchstart", handleAutoplayRetry, true);
+    }
+
+    function attemptAutoplay() {
+      env.audioController.play().then(function (result) {
+        renderAudio();
+        if (!result.ok) {
+          armAutoplayRetry();
+          showBanner("Soundtrack will start on your first click or key press. Browsers block automatic audio with sound.", "warning");
+        } else {
+          disarmAutoplayRetry();
+          hideBanner();
+        }
+      });
     }
 
     function createSessionRecord(outcome, details) {
@@ -926,6 +970,9 @@
         renderAudio();
         if (!result.ok) {
           showBanner("Playback is waiting for a direct browser gesture. Press Play again if needed.", "warning");
+          armAutoplayRetry();
+        } else {
+          disarmAutoplayRetry();
         }
       });
       scheduleUtilityHide();
@@ -1049,17 +1096,13 @@
     renderHistoryVisibility();
     renderUtilityVisibility();
     scheduleUtilityHide();
-    env.audioController.play().then(function (result) {
-      renderAudio();
-      if (!result.ok) {
-        showBanner("Autoplay was blocked by this browser. Press play to start the soundtrack.", "warning");
-      }
-    });
+    window.setTimeout(attemptAutoplay, 180);
 
     return {
       destroy: function () {
         window.clearInterval(tickHandle);
         window.clearTimeout(utilityHideTimer);
+        disarmAutoplayRetry();
       },
       showBanner: showBanner
     };
