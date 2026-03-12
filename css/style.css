@@ -974,6 +974,10 @@ body[data-theme="light"] .field input {
 
 /* ─── Responsive ──────────────────────────────────────────── */
 @media (max-width: 860px) {
+  .video-background video {
+    display: none;
+  }
+
   .bottom-tray {
     flex-direction: column;
     align-items: stretch;
